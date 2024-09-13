@@ -1,0 +1,63 @@
+---
+title: "create_list_aliens"
+author: "Soria Delva"
+date: "2024-09-13"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+Load libraries:
+```{r load_libraries, echo=FALSE}
+library(dplyr)
+library(readr)
+library(here) 
+library(rgbif)
+library(future.apply)
+```
+
+
+##Import data
+Get taxa from the Global Register of Introduced and Invasive Species (GRIIS) checklist for each EU member state
+
+```{r make datasetkey list}
+griis<-read.csv2(here("./data/GRIIS_checklists.csv"))
+griis_list<-as.list(griis$GRIIS_checklist)
+```
+
+```{r create dataset with all griis data of eu member states}
+plan(strategy = "multisession", workers=2)
+
+total_lists<-nrow(griis)
+griis_taxa<-future_lapply(seq_along(griis$GRIIS_checklist), function(x) {
+  print(sprintf("Processing %d of %d", x, total_lists))
+  all_data<-name_usage(datasetKey = griis[x,2], limit=100000)
+  country<-griis[x,1]
+  taxon_data<-all_data$data %>%
+    select(c(nubKey,datasetKey,scientificName,rank, origin, taxonomicStatus))%>%
+    mutate(griis_country = country)
+  return(taxon_data)
+  }
+,future.seed = TRUE
+)
+
+plan(strategy = "sequential") 
+gc() # Clean up memory after processing
+griis_taxa<- do.call(rbind, griis_taxa)  # Merge the different griis taxa datasets 
+
+```
+
+##Count in how many countries an alien is included on the GRIIS checklist
+```{r count aliens on GRIIS checklists}
+griis_overview<-griis_taxa%>%
+  filter(rank%in% c("SPECIES","SUBSPECIES","VARIETY","FORM") |is.na(rank),
+         scientificName!="Incertae sedis")%>%
+  group_by(nubKey, scientificName, rank,taxonomicStatus)%>%
+  summarize(n_obs = n(),
+            countries = paste(unique(griis_country), collapse = ", ")) %>%
+  ungroup() 
+
+```
