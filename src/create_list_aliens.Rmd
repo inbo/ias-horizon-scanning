@@ -29,35 +29,136 @@ griis_list<-as.list(griis$GRIIS_checklist)
 ```
 
 ```{r create dataset with all griis data of eu member states}
-plan(strategy = "multisession", workers=2)
-
-total_lists<-nrow(griis)
-griis_taxa<-future_lapply(seq_along(griis$GRIIS_checklist), function(x) {
-  print(sprintf("Processing %d of %d", x, total_lists))
-  all_data<-name_usage(datasetKey = griis[x,2], limit=100000)
-  country<-griis[x,1]
-  taxon_data<-all_data$data %>%
-    select(c(nubKey,datasetKey,scientificName,rank, origin, taxonomicStatus))%>%
-    mutate(griis_country = country)
-  return(taxon_data)
+ total_lists<-nrow(griis)
+  griis_taxa<-purrr::map(seq_along(griis$GRIIS_checklist), function(x) {
+    print(sprintf("Processing %d of %d", x, total_lists))
+    all_data<-name_usage(datasetKey = griis[x,2], limit=100000)
+    country<-griis[x,1]
+    taxon_data<-all_data$data %>%
+      filter(origin=="SOURCE",
+             rank %in% c("SPECIES", "SUBSPECIES", "VARIETY"))%>% #QUESTION: what about FORM
+      select(c(nubKey,datasetKey,kingdom, phylum, order, family, scientificName,rank,taxonomicStatus))%>%
+      mutate(griis_country = country)
+    return(taxon_data)
   }
-,future.seed = TRUE
-)
-
-plan(strategy = "sequential") 
-gc() # Clean up memory after processing
+  )
+  
 griis_taxa<- do.call(rbind, griis_taxa)  # Merge the different griis taxa datasets 
 
+#NOTE: 2173 nubKeys are NA, extract nubKey based on scientificName. 6385 records do not have ACCEPTED as taxonomicStatus
 ```
+
+##Add rationale to deal with missing nubKeys 
+```{r deal with missing nubkeys}
+#Extract all taxa that do not have an associated nubKey
+nubkey_na<-griis_taxa%>%
+  filter(is.na(nubKey)) %>%
+  select(scientificName, griis_country, datasetKey)
+
+#Remove these taxa from the griis_taxa dataset
+griis_taxa<-griis_taxa%>%
+  filter(!is.na(nubKey))
+
+# Match taxa names with the GBIF backbone, retrieve taxon keys from GBIF when a match is found
+mapped_taxa<-data.frame()
+for (i in 1:nrow(nubkey_na)){
+  nubkey_row<-nubkey_na[i,]
+  data <- rgbif::name_backbone(name = nubkey_row$scientificName)
+  data$griis_country<-nubkey_row$griis_country
+  data$datasetKey<-nubkey_row$datasetKey
+  if(nrow(mapped_taxa)==0){
+    mapped_taxa<-data
+  }else{
+    # check if there are missing columns in data, add them to data filled with NAs
+    missing_cols_data <- setdiff(names(mapped_taxa), names(data))
+    data[missing_cols_data] <- NA
+    rm(missing_cols_data)
+    
+    # check if there are missing columns in mapped_taxa, add them to mapped_taxa filled with NAs
+    missing_cols <- setdiff(names(data), names(mapped_taxa))
+    mapped_taxa[missing_cols] <- NA
+    rm(missing_cols)
+    
+    #Make sure columns are in the right order
+    data <- data[, colnames(mapped_taxa)]
+    
+    #bind data to mapped_taxa
+    mapped_taxa<-rbind(mapped_taxa,data)
+  }
+}
+
+
+#Filter on rank and select same columns as in griis_taxa
+mapped_taxa<-mapped_taxa %>%
+  dplyr::filter(rank %in% c("SPECIES", "SUBSPECIES", "VARIETY"))%>%
+   select(c(usageKey,datasetKey,kingdom, phylum, order, family, scientificName,rank,status,griis_country))%>%
+  rename(nubKey="usageKey",
+         taxonomicStatus="status")
+
+#Reorder columns so they match the order in griis_taxa
+mapped_taxa<-mapped_taxa[,colnames(griis_taxa)]
+
+#Combine datasets
+griis_taxa<-rbind(griis_taxa, mapped_taxa)
+
+#Remove objects 
+remove(mapped_taxa, nubkey_na, nubkey_row)
+
+
+```
+
+##Add rationale to deal with synonyms
+```{r deal with synonyms}
+#Get nubkeys, match them with the gbif backbone, and compare acceptedTaxonKey with key
+#If acceptedTaxonKey is provided (in the case of synonyms), this key will be stored under accepted_taxa_key, if this key is not given the key under column key will be stored here
+synonym_fix<-data.frame()
+for (i in 1:nrow(griis_taxa)){
+  data_row<-griis_taxa[i,]
+  backbone_data<-name_usage(key=data_row$nubKey)$data
+  backbone_data$griis_country<-data_row$griis_country
+  backbone_data$datasetKey<-data_row$datasetKey
+  if(nrow(synonym_fix)==0){
+    synonym_fix<-backbone_data
+  }else{
+    # check if there are missing columns in backbone_data, add them to backbone_data filled with NAs
+    missing_cols_data <- setdiff(names(synonym_fix), names(backbone_data))
+    backbone_data[missing_cols_data] <- NA
+    rm(missing_cols_data)
+    
+    # check if there are missing columns in synonym_fix, add them to synonym_fix filled with NAs
+    missing_cols <- setdiff(names(backbone_data), names(synonym_fix))
+    synonym_fix[missing_cols] <- NA
+    rm(missing_cols)
+    
+    #Make sure columns are in the right order
+    backbone_data <- backbone_data[, colnames(synonym_fix)]
+    
+    #bind data to mapped_taxa
+    synonym_fix<-rbind(synonym_fix,backbone_data)
+  }
+}
+    
+griis_taxa<-synonym_fix%>%
+  mutate(accepted_taxa_key = dplyr::coalesce(acceptedKey, key),
+         accepted_taxon_name=dplyr::coalesce(accepted,scientificName))%>%
+  select(c(accepted_taxa_key, accepted_taxon_name, datasetKey,kingdom, phylum, order, family, scientificName,rank,taxonomicStatus, griis_country))%>%
+  group_by(griis_country, accepted_taxa_key) %>%
+  filter(row_number() == 1) %>%  # Keeps only the first occurrence of each `accepted_taxa_key` within each country
+  ungroup()
+
+```
+
+
 
 ##Count in how many countries an alien is included on the GRIIS checklist
 ```{r count aliens on GRIIS checklists}
 griis_overview<-griis_taxa%>%
-  filter(rank%in% c("SPECIES","SUBSPECIES","VARIETY","FORM") |is.na(rank),
-         scientificName!="Incertae sedis")%>%
-  group_by(nubKey, scientificName, rank,taxonomicStatus)%>%
+  group_by(accepted_taxa_key, accepted_taxon_name)%>%
   summarize(n_obs = n(),
             countries = paste(unique(griis_country), collapse = ", ")) %>%
   ungroup() 
 
 ```
+
+
+
