@@ -213,8 +213,9 @@ griis_taxa<-synonym_fix%>%
 ##Count in how many countries an alien is included on the GRIIS checklist
 ```{r count aliens on GRIIS checklists}
 griis_overview<-griis_taxa%>%
-  group_by(accepted_taxa_key, accepted_taxon_name)%>%
-  summarize(n_obs = n(),
+  filter(kingdom%in%c("Animalia","Plantae"))%>%
+  group_by(accepted_taxa_key, accepted_taxon_name, kingdom, class, rank)%>%
+  summarize(n_checklists = n(),
             countries = paste(unique(griis_country), collapse = ", ")) %>%
   ungroup() 
 
