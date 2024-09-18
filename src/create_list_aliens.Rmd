@@ -134,8 +134,9 @@ nomatch<-mapped_taxa%>%
 
 #Filter on rank and select same columns as in griis_taxa
 mapped_taxa<-mapped_taxa %>%
-  dplyr::filter(rank %in% c("SPECIES", "SUBSPECIES", "VARIETY"))%>%
-   select(c(usageKey,datasetKey,kingdom, phylum, order, family, scientificName,rank,status,griis_country))%>%
+  dplyr::filter(rank %in% c("SPECIES", "SUBSPECIES", "VARIETY"),
+                !is.na(usageKey))%>%
+   select(c(usageKey, datasetKey,kingdom, phylum, order, family, scientificName,rank,status, griis_country, class))%>%
   rename(nubKey="usageKey",
          taxonomicStatus="status")
 
