@@ -220,5 +220,10 @@ griis_overview<-griis_taxa%>%
 
 ```
 
+```{r make graphical overviews of data}
+griis_select<-hist(griis_overview$n_obs)
+ggplot(griis_overview, aes())+
+  geom_histogram()
+```
 
 
