@@ -129,6 +129,8 @@ for (i in 1:nrow(nubkey_na)){
   }
 }
 
+nomatch<-mapped_taxa%>%
+  filter(matchType %in% c("NONE")) #49
 
 #Filter on rank and select same columns as in griis_taxa
 mapped_taxa<-mapped_taxa %>%
