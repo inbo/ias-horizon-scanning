@@ -43,9 +43,9 @@ pb <- progress_bar$new(
     pb$tick()
     all_data<-name_usage(datasetKey = griis[x,2], limit=100000)
     country<-griis[x,1]
-    taxon_data<-all_data$data %>%
-      filter(origin=="SOURCE",
-             rank %in% c("SPECIES", "SUBSPECIES", "VARIETY"))%>% #QUESTION: what about FORM
+    taxon_data<-all_data$data%>%
+      filter(origin=="SOURCE", #CHECK THIS!
+             rank %in% c("SPECIES", "SUBSPECIES", "VARIETY",NA))%>% 
       select(c(nubKey,datasetKey,kingdom, phylum, order, family, scientificName,rank,taxonomicStatus))%>%
       mutate(griis_country = country)
     return(taxon_data)
