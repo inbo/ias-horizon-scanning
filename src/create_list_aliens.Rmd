@@ -52,9 +52,33 @@ pb <- progress_bar$new(
   }
   )
   
-griis_taxa<- do.call(rbind, griis_taxa)  # Merge the different griis taxa datasets 
+griis_taxa<- do.call(rbind, griis_taxa)  # Merge the different griis taxa datasets, 32523
 
-#NOTE: 2173 nubKeys are NA, extract nubKey based on scientificName. 6385 records do not have ACCEPTED as taxonomicStatus
+#Adjust weird spelling
+griis_taxa <- griis_taxa %>%
+  mutate(scientificName = gsub("Ã—", "×", scientificName))%>%
+  mutate(scientificName = gsub("Ã©", "é", scientificName))%>%
+  mutate(scientificName = gsub("í«", "ë", scientificName))%>%
+  mutate(scientificName = gsub("Ã¸", "ø", scientificName))%>%
+  mutate(scientificName = gsub("Ã¼", "ü", scientificName))%>%
+  mutate(scientificName = gsub("Ã¶", "ö", scientificName))%>%
+  mutate(scientificName = gsub("Á¨", "è", scientificName))%>%
+  mutate(scientificName = gsub("Á³", "ó", scientificName))%>%
+  mutate(scientificName = gsub("Ä ", "č", scientificName))%>%
+  mutate(scientificName = gsub("Á¡", "á", scientificName))%>%
+  mutate(scientificName = gsub("Á", "í", scientificName))%>%
+  mutate(scientificName = gsub("Á", "í", scientificName))%>%
+  mutate(scientificName = gsub("í ", "Á", scientificName))%>%
+  mutate(scientificName = gsub("Ã", "Á", scientificName))%>%
+  mutate(scientificName = case_when(scientificName == "Entyloma gaillardianum VÁ¡nky"~
+                                      "Entyloma gaillardianum Vánky",
+                                    scientificName == "Elodea can+D625:M626adensis Michx."~
+                                      "Elodea canadensis Michx.",
+                                    scientificName=="Metha spicata x suaveolens"~
+                                      "Mentha spicata x suaveolens",
+                                      TRUE ~ scientificName))
+
+#NOTE: 1570 nubKeys are NA, extract nubKey based on scientificName. 3582 records do not have ACCEPTED as taxonomicStatus
 ```
 
 ##Add rationale to deal with missing nubKeys 
