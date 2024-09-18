@@ -16,6 +16,7 @@ library(dplyr)
 library(readr)
 library(here) 
 library(rgbif)
+library(progress)
 library(future.apply)
 ```
 
@@ -29,9 +30,17 @@ griis_list<-as.list(griis$GRIIS_checklist)
 ```
 
 ```{r create dataset with all griis data of eu member states}
+# Initialize progress bar
+pb <- progress_bar$new(
+ format = "\033[37m Processing [:bar] :current/:total (:percent) in :elapsed \033[0m",
+  total = total_lists,
+  width = 60,
+  clear = FALSE                   # Keep the bar visible after completion
+)
+
  total_lists<-nrow(griis)
   griis_taxa<-purrr::map(seq_along(griis$GRIIS_checklist), function(x) {
-    print(sprintf("Processing %d of %d", x, total_lists))
+    pb$tick()
     all_data<-name_usage(datasetKey = griis[x,2], limit=100000)
     country<-griis[x,1]
     taxon_data<-all_data$data %>%
@@ -60,8 +69,17 @@ griis_taxa<-griis_taxa%>%
   filter(!is.na(nubKey))
 
 # Match taxa names with the GBIF backbone, retrieve taxon keys from GBIF when a match is found
+# Initialize progress bar
+pb2 <- progress_bar$new(
+ format = "\033[35m Processing [:bar] :current/:total (:percent) in :elapsed \033[0m",
+  total = nrow(nubkey_na),
+  width = 60,
+  clear = FALSE                  
+)
+
 mapped_taxa<-data.frame()
 for (i in 1:nrow(nubkey_na)){
+  pb2$tick()
   nubkey_row<-nubkey_na[i,]
   data <- rgbif::name_backbone(name = nubkey_row$scientificName)
   data$griis_country<-nubkey_row$griis_country
@@ -110,9 +128,19 @@ remove(mapped_taxa, nubkey_na, nubkey_row)
 ##Add rationale to deal with synonyms
 ```{r deal with synonyms}
 #Get nubkeys, match them with the gbif backbone, and compare acceptedTaxonKey with key
-#If acceptedTaxonKey is provided (in the case of synonyms), this key will be stored under accepted_taxa_key, if this key is not given the key under column key will be stored here
+#If acceptedTaxonKey is provided (in the case of synonyms), this key will be stored under accepted_taxa_key, if this key is not given the key under column key will be stored here. It is necessary to run this part for all rows, and not only the synonyms.
+
+# Initialize progress bar
+pb3 <- progress_bar$new(
+ format = "\033[35m Processing [:bar] :current/:total (:percent) in :elapsed \033[0m",
+  total = nrow(griis_taxa),
+  width = 60,
+  clear = FALSE                  
+)
+
 synonym_fix<-data.frame()
 for (i in 1:nrow(griis_taxa)){
+  pb3$tick()
   data_row<-griis_taxa[i,]
   backbone_data<-name_usage(key=data_row$nubKey)$data
   backbone_data$griis_country<-data_row$griis_country
@@ -136,8 +164,12 @@ for (i in 1:nrow(griis_taxa)){
     #bind data to mapped_taxa
     synonym_fix<-rbind(synonym_fix,backbone_data)
   }
+  #if (i %% 100 == 0){
+ # print(sprintf("Processed %d of %d", i, nrow(griis_taxa)))
+  #}
 }
-    
+
+
 griis_taxa<-synonym_fix%>%
   mutate(accepted_taxa_key = dplyr::coalesce(acceptedKey, key),
          accepted_taxon_name=dplyr::coalesce(accepted,scientificName))%>%
