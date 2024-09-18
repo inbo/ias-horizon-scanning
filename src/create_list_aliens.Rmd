@@ -138,7 +138,7 @@ mapped_taxa<-mapped_taxa %>%
                 !is.na(usageKey))%>%
    select(c(usageKey, datasetKey,kingdom, phylum, order, family, scientificName,rank,status, griis_country, class))%>%
   rename(nubKey="usageKey",
-         taxonomicStatus="status")
+         taxonomicStatus="status") #Lost 186 here
 
 #Reorder columns so they match the order in griis_taxa
 mapped_taxa<-mapped_taxa[,colnames(griis_taxa)]
@@ -200,7 +200,8 @@ for (i in 1:nrow(griis_taxa)){
 griis_taxa<-synonym_fix%>%
   mutate(accepted_taxa_key = dplyr::coalesce(acceptedKey, key),
          accepted_taxon_name=dplyr::coalesce(accepted,scientificName))%>%
-  select(c(accepted_taxa_key, accepted_taxon_name, datasetKey,kingdom, phylum, order, family, scientificName,rank,taxonomicStatus, griis_country))%>%
+  filter(rank%in%c("SPECIES", "SUBSPECIES", "VARIETY"))%>%
+  select(c(accepted_taxa_key, accepted_taxon_name, datasetKey,kingdom, phylum, order, family, scientificName,rank,taxonomicStatus, griis_country, class))%>%
   group_by(griis_country, accepted_taxa_key) %>%
   filter(row_number() == 1) %>%  # Keeps only the first occurrence of each `accepted_taxa_key` within each country
   ungroup()
