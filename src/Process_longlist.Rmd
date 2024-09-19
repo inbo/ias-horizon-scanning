@@ -25,3 +25,9 @@ library(terra)
 ```
 
 #Import data
+
+```{r Read in data}
+longlist <- read_excel("data/input/Species_long_list_Ana.xlsx")
+```
+
+
