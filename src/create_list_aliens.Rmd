@@ -78,12 +78,11 @@ griis_taxa <- griis_taxa %>%
                                     scientificName=="Metha spicata x suaveolens"~
                                       "Mentha spicata x suaveolens",
                                       TRUE ~ scientificName))
-
-#NOTE: 1570 nubKeys are NA, extract nubKey based on scientificName. 3582 records do not have ACCEPTED as taxonomicStatus
 ```
 
 ##Add rationale to deal with missing nubKeys 
 ```{r deal with missing nubkeys}
+#NOTE: 1570 nubKeys are NA, for these we need to extract the nubKey based on scientificName. 
 #Extract all taxa that do not have an associated nubKey
 nubkey_na<-griis_taxa%>%
   filter(is.na(nubKey)) %>%
@@ -131,7 +130,7 @@ for (i in 1:nrow(nubkey_na)){
 }
 
 nomatch<-mapped_taxa%>%
-  filter(matchType %in% c("NONE")) #49
+  filter(matchType %in% c("NONE")) #n=48
 
 #Filter on rank and select same columns as in griis_taxa
 mapped_taxa<-mapped_taxa %>%
@@ -155,8 +154,9 @@ remove(mapped_taxa, nubkey_na, nubkey_row)
 
 ##Add rationale to deal with synonyms
 ```{r deal with synonyms}
-#Get nubkeys, match them with the gbif backbone, and compare acceptedTaxonKey with key
-#If acceptedTaxonKey is provided (in the case of synonyms), this key will be stored under accepted_taxa_key, if this key is not given the key under column key will be stored here. It is necessary to run this part for all rows, and not only the synonyms.
+#Get nubkeys, match them with the gbif backbone, and compare acceptedKey with key
+
+#For all synonyms, an acceptedKey and accepted scientific name (column 'accepted') are provided. These will be stored under the field accepted_taxa_key and accepted_taxon_name, respectively. In case the taxon is not a synonym, these are not provided and the values in columns 'key' and 'scientificName' are stored in accepted_taxa_key and accepted_taxon_name. It is necessary to run this part for all rows, and not only the synonyms.
 
 # Initialize progress bar
 pb3 <- progress_bar$new(
@@ -197,8 +197,8 @@ for (i in 1:nrow(griis_taxa)){
   #}
 }
 
-
-griis_taxa<-synonym_fix%>%
+#in this dataset key and nubKey are all equal
+griis_all<-synonym_fix%>%
   mutate(accepted_taxa_key = dplyr::coalesce(acceptedKey, key),
          accepted_taxon_name=dplyr::coalesce(accepted,scientificName))%>%
   filter(rank%in%c("SPECIES", "SUBSPECIES", "VARIETY"))%>%
