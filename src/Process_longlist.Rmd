@@ -1,0 +1,27 @@
+---
+title: "Untitled"
+author: "Soria Delva"
+date: "2024-09-18"
+output: html_document
+---
+This document describes how we arrived at a shortlist of species for the Horizon Scanning workshop, starting from a longlist of 7949 taxa.
+
+# Setup
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+Load libraries.
+```{r Load libraries}
+library(googlesheets4)
+library(googledrive)
+library(readxl)
+library(dplyr)
+library(rgbif)
+library(progress)
+library(sf)
+library(rnaturalearth)
+library(terra)
+```
+
+#Import data
