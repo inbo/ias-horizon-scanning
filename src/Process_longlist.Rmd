@@ -293,3 +293,74 @@ table(mapped_species$class)
 The processed longlist contains 7288 species that can be used for downloading. From the initial 7949 records, 274 could not be matched with the GBIF backbone at species level. After converting synonyms to the accepted taxon and upscaling varieties and subspecies to their respective species level, another 387 turned out to be duplicates of an accepted species that was already present on the list.
 
 
+#Download occurrence data 
+
+##Prepare shapefile of European raster 
+
+Read 50 x 50 km EEA raster grid
+
+```{r Convert 50x50 EEA grid to raster}
+eu_grid <- read_sf("./data/spatial/EEA_50km_grid_v2024.gpkg")
+# Convert geometry to right format
+eu_grid<-st_cast(eu_grid, "GEOMETRYCOLLECTION") %>% st_collection_extract("POLYGON")
+
+##Convert the grid to a raster
+
+eu_grid_vect <- vect(eu_grid)
+
+# Define the resolution of the raster (50000x50000 meters)
+resolution <- 50000  
+
+# Create an empty raster with the extent, resolution, and crs
+raster_template <- rast(ext(eu_grid_vect), 
+                        resolution = resolution, 
+                        crs = crs(eu_grid_vect))
+
+# Rasterize the shapefile - converting polygons to a raster
+# Choose the column to rasterize (cellcode)
+EU_raster <- rasterize(eu_grid_vect, raster_template, field = "cellcode")
+
+# Plot the rasterized data
+mapview(EU_raster)
+
+```
+
+Mask rastergrid to extent of EU member states and their respective EEZ 
+
+```{r Mask EEA raster grid and convert to shapefile}
+#Create vector of EU member states
+memberstates<-read.csv2(here("./data/input/GRIIS_checklists.csv"))%>%
+  pull(EU_state)
+
+#Get shapefile of EEZ of EU member states
+EEZ<-st_read("./data/spatial/EEZ/EEZ_land_v2_201410.shp")%>%
+  filter(Country%in% c(memberstates, "Czech Republic"))
+
+#Explore
+mapview::mapview(EEZ)
+
+#Transform to same crs as 50x50rastergrid
+EEZ<-EEZ%>%
+  st_transform(., crs=st_crs(eu_grid))
+
+#Crop raster grid to extent of EEZ shape
+EEZ_ext<-terra::ext(EEZ) 
+
+#Convert EEZ to a SpatVector that can be used for masking
+EEZ_vector <- vect(EEZ) 
+
+#Crop EU_raster to extent of EEZ
+EU_raster_crop <- terra::crop(EU_raster, EEZ_ext)
+
+#Mask cropped EU_raster with SpatVector of EEZ
+EU_50raster <- terra::mask(EU_raster_crop, EEZ_vector)
+
+#Visualize raster
+mapview(EU_50raster)
+#Remove objects 
+rm(EEZ,EEZ_ext, EEZ_vector, EU_raster, EU_grid, EU_raster_crop)
+
+#Store in right wkt format to feed into gbif download
+
+```
+
