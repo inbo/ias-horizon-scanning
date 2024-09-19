@@ -25,11 +25,12 @@ library(future.apply)
 Get taxa from the Global Register of Introduced and Invasive Species (GRIIS) checklist for each EU member state
 
 ```{r make datasetkey list}
-griis<-read.csv2(here("./data/GRIIS_checklists.csv"))
+griis<-read.csv2(here("./data/input/GRIIS_checklists.csv"))
 griis_list<-as.list(griis$GRIIS_checklist)
 ```
 
 ```{r create dataset with all griis data of eu member states}
+
 # Initialize progress bar
 pb <- progress_bar$new(
  format = "\033[37m Processing [:bar] :current/:total (:percent) in :elapsed \033[0m",
