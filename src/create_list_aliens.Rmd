@@ -33,13 +33,12 @@ griis_list<-as.list(griis$GRIIS_checklist)
 
 # Initialize progress bar
 pb <- progress_bar$new(
- format = "\033[37m Processing [:bar] :current/:total (:percent) in :elapsed \033[0m",
-  total = total_lists,
+ format = "\033[35m Processing [:bar] :current/:total (:percent) in :elapsed \033[0m",
+  total = nrow(griis),
   width = 60,
   clear = FALSE                   # Keep the bar visible after completion
 )
 
- total_lists<-nrow(griis)
   griis_taxa<-purrr::map(seq_along(griis$GRIIS_checklist), function(x) {
     pb$tick()
     all_data<-name_usage(datasetKey = griis[x,2], limit=100000)
