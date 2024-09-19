@@ -220,3 +220,68 @@ mapped_species<-rbind(mapped_species_short, synonym_fix)
 rm(mapped_species_short)
 ```
 
+##Do an upscale of accepted subspecies and varieties to their respective species level: CHECK WITH TIM WHETHER NECESSARY!!
+```{r Deal with subspecies and varieties}
+#Filter the taxa for which the key is not equal to the speciesKey
+#These include subspecies, varieties, and synonyms that received the accepted taxonkey of an accepted variety or subspecies rather than an actual species
+
+#Select taxa for which accepted_taxa_key does not equal the speciesKey
+subspecies<-mapped_species%>%
+  filter(key!=speciesKey)
+
+#Remove these taxa from griis_all
+mapped_species<-mapped_species%>%
+  filter(key==speciesKey)
+
+#Since the key will be the key of the accepted subspecies or variety, and the scientificName will be either the name of the accepted subspecies and variety, we'll need to map the speciesKey back to the GBIF backbone to get the scientificName (and accepted_taxon_name) for the accepted species. Just overwriting the key with the speciesKey will not be enough as the name will still be the wrong one (see this paragraph)
+
+# Initialize progress bar
+pb2 <- progress_bar$new(
+ format = "\033[35m Processing [:bar] :current/:total (:percent) in :elapsed \033[0m",
+  total = nrow(subspecies),
+  width = 60,
+  clear = FALSE                  
+)
+
+subspecies_fix<-data.frame()
+for (i in 1:nrow(subspecies)){
+  pb2$tick()
+  data_row<-subspecies[i,]
+  backbone_data<-name_usage(key=data_row$speciesKey)$data #Map the speciesKey back to get taxonomic info
+  backbone_data$Source<-data_row$Source
+  backbone_data$Thematic_group<-data_row$Thematic_group
+  backbone_data$ID<-data_row$ID
+  if(nrow(subspecies_fix)==0){
+    subspecies_fix<-backbone_data
+  }else{
+    # check if there are missing columns in backbone_data, add them to backbone_data filled with NAs
+    missing_cols_data <- setdiff(names(subspecies_fix), names(backbone_data))
+    backbone_data[missing_cols_data] <- NA
+    rm(missing_cols_data)
+    
+    # check if there are missing columns in subspecies_fix, add them to subspecies_fix filled with NAs
+    missing_cols <- setdiff(names(backbone_data), names(subspecies_fix))
+    subspecies_fix[missing_cols] <- NA
+    rm(missing_cols)
+    
+    #Make sure columns are in the right order
+    backbone_data <- backbone_data[, colnames(subspecies_fix)]
+    
+    #bind data to mapped_taxa
+    subspecies_fix<-rbind(subspecies_fix,backbone_data)
+  }
+}
+#all values of key are equal to nubKey
+subspecies_fix<-subspecies_fix%>%
+  select(c(colnames(mapped_species)))
+
+#Bind the two dataframes back together
+mapped_species<-rbind(mapped_species, subspecies_fix) #7675
+
+#By converting synonyms, subspecies, and varieties back to the accepted species, there is a chance that the same species will occur multiple times in the list, we need to collapse first
+mapped_species<-mapped_species%>%
+  distinct(key, .keep_all = TRUE)%>%
+  select(-c(speciesKey, taxonomicStatus,rank)) #Remove columns that we don't need anymore, all speciesKeys are equal to key, taxonomicStatus is accepted or doubtful (no more synonyms), and rank is species
+
+```
+
