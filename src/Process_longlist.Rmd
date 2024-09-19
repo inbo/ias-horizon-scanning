@@ -160,3 +160,63 @@ table(mapped_species$rank)
 ```
 Looks good, but there are some synonym taxa and sub taxa levels (subspecies, variety, form) present in the data, that need to be dealt with before we can proceed to the occurrence download.
 
+##Convert synonyms to accepted taxa 
+
+```{r Deal with synonyms}
+#For all synonyms, an acceptedUsageKey of the accepted species, subspecies, or variety is provided. These records will be mapped again against the backbone, using this acceptedUsageKey.
+not_accepted<-mapped_species%>%
+  filter(!is.na(acceptedUsageKey))
+
+mapped_species<-mapped_species%>%
+  filter(is.na(acceptedUsageKey))
+
+# Initialize progress bar
+pb1 <- progress_bar$new(
+ format = "\033[35m Processing [:bar] :current/:total (:percent) in :elapsed \033[0m",
+  total = nrow(not_accepted),
+  width = 60,
+  clear = FALSE                  
+)
+
+synonym_fix<-data.frame()
+for (i in 1:nrow(not_accepted)){
+  pb1$tick()
+  data_row<-not_accepted[i,]
+  backbone_data<-name_usage(key=data_row$acceptedUsageKey)$data
+  backbone_data$Source<-data_row$Source
+  backbone_data$Thematic_group<-data_row$Thematic_group
+  backbone_data$ID<-data_row$ID
+  if(nrow(synonym_fix)==0){
+    synonym_fix<-backbone_data
+  }else{
+    # check if there are missing columns in backbone_data, add them to backbone_data filled with NAs
+    missing_cols_data <- setdiff(names(synonym_fix), names(backbone_data))
+    backbone_data[missing_cols_data] <- NA
+    rm(missing_cols_data)
+    
+    # check if there are missing columns in synonym_fix, add them to synonym_fix filled with NAs
+    missing_cols <- setdiff(names(backbone_data), names(synonym_fix))
+    synonym_fix[missing_cols] <- NA
+    rm(missing_cols)
+    
+    #Make sure columns are in the right order
+    backbone_data <- backbone_data[, colnames(synonym_fix)]
+    
+    #bind data to mapped_taxa
+    synonym_fix<-rbind(synonym_fix,backbone_data)
+  }
+}
+
+#For all taxa, nubKey equals key, except that there are 13 for which key is valid but nubKey is NA so we'll proceed with the key column
+synonym_fix<-synonym_fix%>%
+  select(c(key, speciesKey, scientificName, kingdom, phylum, class, order, family, genus, rank, taxonomicStatus, Source, Thematic_group, ID )) 
+
+mapped_species_short<-mapped_species%>%
+  rename(key = "usageKey",
+         taxonomicStatus = "status")%>%
+  select(c(colnames(synonym_fix)))
+
+mapped_species<-rbind(mapped_species_short, synonym_fix)
+rm(mapped_species_short)
+```
+
