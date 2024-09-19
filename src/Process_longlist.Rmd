@@ -285,3 +285,11 @@ mapped_species<-mapped_species%>%
 
 ```
 
+```{r get data overview}
+table(mapped_species$kingdom)
+table(mapped_species$class)
+```
+
+The processed longlist contains 7288 species that can be used for downloading. From the initial 7949 records, 274 could not be matched with the GBIF backbone at species level. After converting synonyms to the accepted taxon and upscaling varieties and subspecies to their respective species level, another 387 turned out to be duplicates of an accepted species that was already present on the list.
+
+
