@@ -152,3 +152,11 @@ matchafterall<-correct_taxa%>%
   filter(!is.na(speciesKey))
 ```
 
+Get an overview of how the data look like.
+```{r get taxa overview}
+table(mapped_species$kingdom)
+table(mapped_species$status)
+table(mapped_species$rank)
+```
+Looks good, but there are some synonym taxa and sub taxa levels (subspecies, variety, form) present in the data, that need to be dealt with before we can proceed to the occurrence download.
+
