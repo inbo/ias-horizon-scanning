@@ -31,3 +31,49 @@ longlist <- read_excel("data/input/Species_long_list_Ana.xlsx")
 ```
 
 
+#Process data
+
+##Match initial dataset with the GBIF backbone
+
+Match data.
+```{r Match scientific names with GBIF backbone}
+# Match taxa names with the GBIF backbone, retrieve taxon keys from GBIF when a match is found
+# Initialize progress bar
+pb <- progress_bar$new(
+ format = "\033[35m Processing [:bar] :current/:total (:percent) in :elapsed \033[0m",
+  total = nrow(longlist),
+  width = 60,
+  clear = FALSE                  
+)
+
+mapped_taxa<-data.frame()
+for (i in 1:nrow(longlist)){
+  pb$tick()
+  nubkey_row<-longlist[i,]
+  data <- rgbif::name_backbone(name = nubkey_row$`Long name`)
+  data$Source<-nubkey_row$Source
+  data$Thematic_group<-nubkey_row$`Thematic group`
+  data$ID<-nubkey_row$ID
+  if(nrow(mapped_taxa)==0){
+    mapped_taxa<-data
+  }else{
+    # check if there are missing columns in data, add them to data filled with NAs
+    missing_cols_data <- setdiff(names(mapped_taxa), names(data))
+    data[missing_cols_data] <- NA
+    rm(missing_cols_data)
+    
+    # check if there are missing columns in mapped_taxa, add them to mapped_taxa filled with NAs
+    missing_cols <- setdiff(names(data), names(mapped_taxa))
+    mapped_taxa[missing_cols] <- NA
+    rm(missing_cols)
+    
+    #Make sure columns are in the right order
+    data <- data[, colnames(mapped_taxa)]
+    
+    #bind data to mapped_taxa
+    mapped_taxa<-rbind(mapped_taxa,data)
+  }
+}
+
+```
+
