@@ -77,3 +77,28 @@ for (i in 1:nrow(longlist)){
 
 ```
 
+Export taxa that do not match with the GBIF backbone at species level.
+```{r Export taxa without GBIF match}
+#Filter out those that have no match with GBIF backbone
+nomatch<-mapped_taxa%>%
+  filter(matchType=="NONE")%>%
+  select(c(ID, Thematic_group, verbatim_name,Source))
+
+#Filter out those that have a match, but not at species level
+nospeciesmatch<-mapped_taxa%>%
+  filter(matchType!="NONE")%>%
+  filter(is.na(speciesKey))%>%
+  select(c(ID, Thematic_group, verbatim_name,Source))
+
+# Write data to the new Google Sheets file
+#ss0 <- gs4_create("longlist_no_match", sheets="Data")
+#sheet_write(nomatch, ss= ss0, sheet="Data")
+#ss1 <- gs4_create("longlist_no_species_match", sheets="Data")
+#sheet_write(nospeciesmatch, ss = ss1, sheet="Data")
+
+#Only keep taxa that are mapped to species level: n = 7675
+mapped_species<-mapped_taxa%>%
+  filter(!is.na(speciesKey))
+
+```
+
