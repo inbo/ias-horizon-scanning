@@ -5,6 +5,8 @@ date: "2024-09-13"
 output: html_document
 ---
 
+This script is constructed to assess how many times a given alien species is included on the GRIIS checklist of EU countries (maximum is 27 times)
+
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
 ```
