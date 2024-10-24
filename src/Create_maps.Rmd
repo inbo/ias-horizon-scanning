@@ -5,8 +5,9 @@ date: "2024-10-10"
 output: html_document
 ---
 
-# Setup
+This script is written to create the PDF pages with occupancy and climate matching maps used in the final report.
 
+# Setup
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
 ```
@@ -31,6 +32,10 @@ library(stringr)
 library(progress)
 library(pdftools)
 library(qpdf)
+library(magick)
+library(future)
+library(future.apply)
+library(parallel)
 ```
 
 # Load datafiles
@@ -315,89 +320,118 @@ longnames<-c("HS8413","HS1508","HS271","HS6986","HS8116","HS668","HS4242","HS216
 mid_x <- 4604652
 mid_y <- 6050868
 
-# Initialize progress bar
+#set progress bar
 pb <- progress_bar$new(
-  format = "\033[35m Processing [:bar] :current/:total (:percent) in :elapsed \033[0m",
+ format = "\033[35m Processing [:bar] :current/:total (:percent) in :elapsed \033[0m",
   total = length(unique(maps_data$ID)),
   width = 60,
-  clear = FALSE                  
-)
+  clear = FALSE )   
 
-#Export PDFs in loop
-for (i in unique(maps_data$ID)){
-  #Check progress
-  pb$tick()
-  
-  #Store species ID
-  species_ID<-i
-  
-  #Set size of title
-  if(species_ID %in% longnames){
-  title_size=12
-  }else{
-    title_size=16
-  }
-  
-  #Get gridcell dataset of this species
-  plot_data<-maps_data%>%
-    filter(ID==species_ID)
-  
-  #Get gridcell dataset outside EU of this species
-  plot_nonEU_data<-maps_data_outside_EU%>%
-    filter(ID==species_ID)
-  
-  #Get scientific name of the species 
-  name<-unique(plot_data$scientificName)
-  first_two_words <- sub("^(\\w+\\s+\\w+).*", "\\1", name)  # Extract first two words
-  rest_of_name <- sub("^\\w+\\s+\\w+\\s+(.*)", "\\1", name)  # Extract the rest of the name
-  
-  #Get number of gridcells occupied by the species in the EU and outside EU
-  n_gridcells<-unique(plot_data$total_grid_cells)
-  n_gridcells_outsideEU<-unique(plot_nonEU_data$total_grid_cells)
-                                
-  #Get thematic group the species belongs to
-  thematic_group<-unique(plot_data$Thematic_group)
+
+system.time({
+  #Export PNGs in parallel execution 
+  for(i in unique(maps_data$ID)) {
     
-  custom_palette <- c(
+    pb$tick()
+    #Store species ID
+    species_ID<-i
+    
+    #Set size of title
+    if(species_ID %in% longnames){
+      title_size=12
+    }else{
+      title_size=16
+    }
+    
+    #Get gridcell dataset of this species
+    plot_data<-maps_data%>%
+      filter(ID==species_ID)
+    
+    #Get gridcell dataset outside EU of this species
+    plot_nonEU_data<-maps_data_outside_EU%>%
+      filter(ID==species_ID)
+    
+    #Get scientific name of the species 
+    name<-unique(plot_data$scientificName)
+    first_two_words <- sub("^(\\w+\\s+\\w+).*", "\\1", name)  # Extract first two words
+    rest_of_name <- sub("^\\w+\\s+\\w+\\s+(.*)", "\\1", name)  # Extract the rest of the name
+    
+    #Get number of gridcells occupied by the species in the EU and outside EU
+    n_gridcells<-unique(plot_data$total_grid_cells)
+    n_gridcells_outsideEU<-unique(plot_nonEU_data$total_grid_cells)
+    
+    #Get thematic group the species belongs to
+    thematic_group<-unique(plot_data$Thematic_group)
+    
+    custom_palette <- c(
       "In EU"="red",
       "Outside EU" =  "#1154f2")
-  
-  if(thematic_group %in% c("Marine")){
-    plot1<-ggplot(plot_data) +
-      geom_sf(data = europe, colour = "#636363", fill = "white") + ##575757
-      geom_sf(data = EEZ,  colour = "grey80", fill = "#f7fdff")+
-      geom_sf(data = region_shape,  colour = "black", fill = "#f0f0f0")+
-      geom_tile(aes(x = x, y = y, fill="In EU"), color = "black", width = 50000, height = 50000) +
-      geom_tile(data= plot_nonEU_data, aes(x = x, y = y, fill="Outside EU"), color = "black", width = 50000, height = 50000) +
-      labs(x = NULL, y = NULL, fill = "Grid Cell") +
-      scale_fill_manual(values=custom_palette, 
-                        name="Occupied grid cells",
-                        breaks = c("In EU", "Outside EU"),
-                        drop = FALSE)+
-      theme_bw()  +
-      annotate("text", x = mid_x-360000, y = mid_y-140000, 
-               label = paste0(n_gridcells," grid cell(s) occupied in EU"), 
-               size = 4, color = "red", fontface = "bold", 
-               hjust = 0.5, vjust = 0)+
-      # Second part: Red text
-      annotate("text", x = mid_x-360000, y = mid_y -450000, 
-               label =  paste0(n_gridcells_outsideEU," grid cell(s) occupied outside EU"), 
-               size = 4, color = "#1154f2", fontface = "bold", 
-               hjust = 0.5, vjust = 0)+
-      coord_sf(xlim = c(1854476, 6605897), 
-               ylim = c(1363659, 5969923))+
-       theme(legend.key.size = unit(0.55, "cm"))
     
-    #Create an empty plot to fill PDF
-    empty_plot <- ggplot() + 
-                  theme_void() + 
-                  theme(plot.background = element_blank()) 
-  
-    #Export only this plot as no climate matching was done for marine species
-    plot_final<-plot1 /empty_plot +   plot_annotation( title = bquote(italic(.(first_two_words)) ~ .(rest_of_name) ~ "(ID " * .(species_ID) * ")"), theme = theme(plot.title = element_text(size = title_size, face = "bold", hjust = 0.5)))
-    
-    ggsave(filename = paste0(first_two_words,"_", species_ID, ".png"), plot = plot_final, 
+    if(thematic_group %in% c("Marine")){
+      plot1<-ggplot(plot_data) +
+        geom_sf(data = europe, colour = "#636363", fill = "white") + ##575757
+        geom_sf(data = EEZ,  colour = "grey80", fill = "#f7fdff")+
+        geom_sf(data = region_shape,  colour = "black", fill = "#f0f0f0")+
+        geom_tile(aes(x = x, y = y, fill="In EU"), color = "black", width = 50000, height = 50000) +
+        geom_tile(data= plot_nonEU_data, aes(x = x, y = y, fill="Outside EU"), color = "black", width = 50000, height = 50000) +
+        labs(x = NULL, y = NULL, fill = "Grid Cell") +
+        scale_fill_manual(values=custom_palette, 
+                          name="Occupied grid cells",
+                          breaks = c("In EU", "Outside EU"),
+                          drop = FALSE)+
+        theme_bw()  +
+        annotate("text", x = mid_x-360000, y = mid_y-140000, 
+                 label = paste0(n_gridcells," grid cell(s) occupied in EU"), 
+                 size = 4, color = "red", fontface = "bold", 
+                 hjust = 0.5, vjust = 0)+
+        # Second part: Red text
+        annotate("text", x = mid_x-360000, y = mid_y -450000, 
+                 label =  paste0(n_gridcells_outsideEU," grid cell(s) occupied outside EU"), 
+                 size = 4, color = "#1154f2", fontface = "bold", 
+                 hjust = 0.5, vjust = 0)+
+        coord_sf(xlim = c(1854476, 6605897), 
+                 ylim = c(1363659, 5969923))+
+        theme(legend.key.size = unit(0.55, "cm"))
+      
+      #Create an empty plot to fill PDF
+      empty_plot <- ggplot() + 
+        theme_void() + 
+        theme(plot.background = element_blank()) 
+      
+      #Export only this plot as no climate matching was done for marine species
+      plot_final<-plot1 /empty_plot 
+      
+      # Define the file paths
+      plot_png_path <- paste0("./plots/", thematic_group, "/", first_two_words, "_", species_ID, ".png")
+      plot_pdf_path <- paste0("./plots/", thematic_group, "/", first_two_words, "_", species_ID, ".pdf")
+      
+      ggsave(filename = paste0(first_two_words,"_", species_ID, ".png"), plot = plot_final, 
              device = "png", width =8.27 , height = 11.69, path=paste0("./plots/",thematic_group))
+      
+      # Read the PNG image back in
+      img <- image_read(plot_png_path)
+      
+      # Start a PDF device for output
+      pdf(plot_pdf_path, width = 8.27, height = 11.69)
+      
+      # Create a layout for title and image
+      grid.newpage()
+      
+      # Add title at the top of the PDF
+      grid.text(
+        label = bquote(italic(.(first_two_words)) ~ .(rest_of_name) ~ "(ID " * .(species_ID) * ")"),
+        x = 0.5, y = 0.95, just = "center", gp = gpar(fontsize = title_size, fontface = "bold")
+      )
+      
+      # Add the PNG image below the title
+     grid.raster(img, width = unit(0.9, "npc"), height = unit(0.9, "npc"), y = 0.47)
+      
+      # Close the PDF device
+      dev.off()
+      
+      # Remove the PNG file from the local directory
+      file.remove(plot_png_path)
+      
   }else{
     
     plot1<-ggplot(plot_data) +
@@ -423,7 +457,7 @@ for (i in unique(maps_data$ID)){
                hjust = 0.5, vjust = 0)+
       coord_sf(xlim = c(1854476, 6605897), #Check that this does not exclude any records: OK
                ylim = c(1363659, 5969923))+
-       theme(legend.key.size = unit(0.5, "cm"))
+      theme(legend.key.size = unit(0.5, "cm"))
     
     
     #----------------Create plot 2----------------
@@ -451,7 +485,7 @@ for (i in unique(maps_data$ID)){
       ">80-90" = "#800026", 
       ">90-100"= "#470808",
       "Not calculated" = "white")
-
+    
     
     #Create plot for species that have a match with EU climate
     if(!(all(is.na(cm_data$Classification)))){
@@ -472,7 +506,7 @@ for (i in unique(maps_data$ID)){
       #Create plot if climate match data is available for this species under this scenario
       if(!(all(is.na(cm_current$Classification)))){  
         plot2<-ggplot(cm_current) +
-                    geom_sf(data = st_as_sf(data.frame(CM_range = factor(all_levels, levels = all_levels), geometry = st_sfc(rep(cm_data$geometry[1], length(all_levels))))),
+          geom_sf(data = st_as_sf(data.frame(CM_range = factor(all_levels, levels = all_levels), geometry = st_sfc(rep(cm_data$geometry[1], length(all_levels))))),
                   aes(fill = CM_range),
                   alpha=NA)+
           geom_sf(data = europe, 
@@ -490,29 +524,29 @@ for (i in unique(maps_data$ID)){
                subtitle = "Scenario A1FI (high emissions)",
                x = NULL, 
                y = NULL) +
-      annotate("text", 
-               x = mid_x-2860000, #
-               y = mid_y-280000, #
-               label = substitute(italic(n) == value * " (global)", list(value = n_totaal)),   
-               fontface = "bold", 
-               size = 3, 
-               color = "#48494a",
-               hjust = 0,
-               vjust = 0)+
-      annotate("text", 
-               x = mid_x-2920000, #
-               y = mid_y+40000, #
-               label = paste("Stand. potential occupancy:",stand_occ_pot_current),   
-               fontface = "bold", 
-               size = 3, 
-               color = "#48494a",
-               hjust = 0,
-               vjust = 0)+
+          annotate("text", 
+                   x = mid_x-2860000, #
+                   y = mid_y-280000, #
+                   label = substitute(italic(n) == value * " (global)", list(value = n_totaal)),   
+                   fontface = "bold", 
+                   size = 3, 
+                   color = "#48494a",
+                   hjust = 0,
+                   vjust = 0)+
+          annotate("text", 
+                   x = mid_x-2920000, #
+                   y = mid_y+40000, #
+                   label = paste("Stand. potential occupancy:",stand_occ_pot_current),   
+                   fontface = "bold", 
+                   size = 3, 
+                   color = "#48494a",
+                   hjust = 0,
+                   vjust = 0)+
           theme_bw() +
-  theme(plot.subtitle = element_text(color = "#636363"),
-        legend.key.size = unit(0.55, "cm"))+
-      coord_sf(xlim = c(1854476, 6605897), 
-               ylim = c(1363659, 6169923))
+          theme(plot.subtitle = element_text(color = "#636363"),
+                legend.key.size = unit(0.55, "cm"))+
+          coord_sf(xlim = c(1854476, 6605897), 
+                   ylim = c(1363659, 6169923))
       }else{
         
         plot2<-ggplot()+
@@ -532,8 +566,8 @@ for (i in unique(maps_data$ID)){
                    label = "No match with EU climate", 
                    size = 4, color = "red", fontface = "bold", 
                    hjust = 0.5, vjust = 0.75)+
-      coord_sf(xlim = c(1854476, 6605897), 
-               ylim = c(1363659, 6169923))
+          coord_sf(xlim = c(1854476, 6605897), 
+                   ylim = c(1363659, 6169923))
         
         
       }
@@ -569,32 +603,32 @@ for (i in unique(maps_data$ID)){
                             breaks = all_levels,
                             drop = FALSE) +
           labs(title = paste0("Climate match for period ", date_range),
-                subtitle = "Scenario A1FI (high emissions)",
+               subtitle = "Scenario A1FI (high emissions)",
                x = NULL, 
                y = NULL) +
-       annotate("text", 
-               x = mid_x-2860000, #
-               y = mid_y-280000, #
-               label = substitute(italic(n) == value * " (global)", list(value = n_totaal)),   
-               fontface = "bold", 
-               size = 3, 
-               color = "#48494a",
-               hjust = 0,
-               vjust = 0)+
-      annotate("text", 
-               x = mid_x-2920000, #
-               y = mid_y+40000, #
-               label = paste("Stand. potential occupancy:",stand_occ_pot_future),   
-               fontface = "bold", 
-               size = 3, 
-               color = "#48494a",
-               hjust = 0,
-               vjust = 0)+
+          annotate("text", 
+                   x = mid_x-2860000, #
+                   y = mid_y-280000, #
+                   label = substitute(italic(n) == value * " (global)", list(value = n_totaal)),   
+                   fontface = "bold", 
+                   size = 3, 
+                   color = "#48494a",
+                   hjust = 0,
+                   vjust = 0)+
+          annotate("text", 
+                   x = mid_x-2920000, #
+                   y = mid_y+40000, #
+                   label = paste("Stand. potential occupancy:",stand_occ_pot_future),   
+                   fontface = "bold", 
+                   size = 3, 
+                   color = "#48494a",
+                   hjust = 0,
+                   vjust = 0)+
           theme_bw() +
-  theme(plot.subtitle = element_text(color = "#636363"),
-        legend.key.size = unit(0.55, "cm"))+
-      coord_sf(xlim = c(1854476, 6605897), 
-               ylim = c(1363659, 6169923))
+          theme(plot.subtitle = element_text(color = "#636363"),
+                legend.key.size = unit(0.55, "cm"))+
+          coord_sf(xlim = c(1854476, 6605897), 
+                   ylim = c(1363659, 6169923))
       }else{
         
         plot3<-ggplot()+
@@ -614,15 +648,13 @@ for (i in unique(maps_data$ID)){
                    label = "No match with EU climate", 
                    size = 4, color = "red", fontface = "bold", 
                    hjust = 0.5, vjust = 0.75) +
-      coord_sf(xlim = c(1854476, 6605897), 
-               ylim = c(1363659, 6169923))
+          coord_sf(xlim = c(1854476, 6605897), 
+                   ylim = c(1363659, 6169923))
         
       }        
-    
+      
       #Create final plot
-      plot_final<-plot1/plot2/plot3 + 
-        plot_annotation(title = bquote(italic(.(first_two_words)) ~ .(rest_of_name) ~ "(ID " * .(species_ID) * ")"),
-                        theme = theme(plot.title = element_text(size = title_size, face = "bold", hjust = 0.5)))
+      plot_final<-plot1/plot2/plot3 
       
     }else{
       #Create plot 2
@@ -642,77 +674,173 @@ for (i in unique(maps_data$ID)){
                  label = "No match with EU climate or \nno (reliable) occurrences available to determine match", 
                  size = 4, color = "red", fontface = "bold", 
                  hjust = 0.5, vjust = 0.75) +
-      coord_sf(xlim = c(1854476, 6605897), 
-               ylim = c(1363659, 6169923))
+        coord_sf(xlim = c(1854476, 6605897), 
+                 ylim = c(1363659, 6169923))
       
       #Create final plot
-      plot_final<-plot1/plot2 + 
-        plot_annotation( title = bquote(italic(.(first_two_words)) ~ .(rest_of_name) ~ "(ID " * .(species_ID) * ")"),
-                         theme = theme(plot.title = element_text(size = title_size, face = "bold", hjust = 0.5)))
+      plot_final<-plot1/plot2 
       
     }
     
     if(thematic_group %in%c("Plants", "Verts", "TER Inverts", "FW Inverts")){
+      
+      # Define the file paths
+      plot_png_path <- paste0("./plots/", thematic_group, "/", first_two_words, "_", species_ID, ".png")
+      plot_pdf_path <- paste0("./plots/", thematic_group, "/", first_two_words, "_", species_ID, ".pdf")
+      
       # Save each plot as a PDF file
       ggsave(filename = paste0(first_two_words,"_", species_ID, ".png"), plot = plot_final, 
              device = "png", width =8.27 , height = 11.69, path=paste0("./plots/",thematic_group))
+      
+      # Read the PNG image back in
+  img <- image_read(plot_png_path)
+  
+  # Start a PDF device for output
+  pdf(plot_pdf_path, width = 8.27, height = 11.69)
+  
+  # Create a layout for title and image
+  grid.newpage()
+  
+  # Add title at the top of the PDF
+  grid.text(
+    label = bquote(italic(.(first_two_words)) ~ .(rest_of_name) ~ "(ID " * .(species_ID) * ")"),
+    x = 0.5, y = 0.95, just = "center", gp = gpar(fontsize = title_size, fontface = "bold")
+  )
+  
+  # Add the PNG image below the title
+ grid.raster(img, width = unit(0.9, "npc"), height = unit(0.9, "npc"), y = 0.47)
+  
+  # Close the PDF device
+  dev.off()
+  
+  # Remove the PNG file from the local directory
+    file.remove(plot_png_path)
+  
     }else{
+      # Define the file paths
+      plot_png_path <- paste0("./plots/Others/", first_two_words, "_", species_ID, ".png")
+      plot_pdf_path <- paste0("./plots/Others/", first_two_words, "_", species_ID, ".pdf")
+      
       ggsave(filename = paste0(first_two_words,"_", species_ID, ".png"), plot = plot_final, 
              device = "png", width =8.27 , height = 11.69, path="./plots/Others")
+      
+      # Read the PNG image back in
+  img <- image_read(plot_png_path)
+  
+  # Start a PDF device for output
+  pdf(plot_pdf_path, width = 8.27, height = 11.69)
+  
+  # Create a layout for title and image
+  grid.newpage()
+  
+  # Add title at the top of the PDF
+  grid.text(
+    label = bquote(italic(.(first_two_words)) ~ .(rest_of_name) ~ "(ID " * .(species_ID) * ")"),
+    x = 0.5, y = 0.95, just = "center", gp = gpar(fontsize = title_size, fontface = "bold")
+  )
+  
+  # Add the PNG image below the title
+  grid.raster(img, width = unit(0.9, "npc"), height = unit(0.9, "npc"), y = 0.47)
+  
+  # Close the PDF device
+  dev.off()
+  
+  # Remove the PNG file from the local directory
+    file.remove(plot_png_path)
+  
     }
   }
 }
+  })
 
 ```
 
 ```{r Combine PDFs into final report}
 # Define folders and their output names
-folders <- c("./plots/Report","./plots/FW Inverts","./plots/Marine","./plots/Plants", "./plots/TER Inverts" ,"./plots/Verts" )
-grouped_pdfs <- c("Report.pdf", "fw_inverts_group.pdf","marine_group.pdf", "plants_group.pdf","ter_inverts_group.pdf", "verts_group.pdf"  )
+folders <- c("./plots/FW Inverts","./plots/Marine","./plots/Plants", "./plots/TER Inverts" ,"./plots/Verts" )
+groups <- c( "fw_inverts","marine", "plants","ter_inverts", "verts"  )
 
-# Use the full paths for output files
-grouped_pdfs <- file.path("./plots/Report/grouped_pdfs", grouped_pdfs)
 
-# Function to merge PDFs in chunks within a folder
-merge_pdfs_in_chunks <- function(pdf_files, temp_output) {
-  chunk_size <- 20 # Adjust based on system limits, try smaller if necessary
-  merged_files <- c()
+#set progress bar
+pb <- progress_bar$new(
+ format = "\033[35m Processing [:bar] :current/:total (:percent) in :elapsed \033[0m",
+  total = length(folders),
+  width = 60,
+  clear = FALSE                  
+)
+
+i<-1
+
+for (folder in folders) {
+  #Update progressbar
+  pb$tick()
   
-  # Process in chunks
-  for (i in seq(1, length(pdf_files), by = chunk_size)) {
-    # Select the next chunk
-    chunk <- pdf_files[i:min(i + chunk_size - 1, length(pdf_files))]
-    
-    # Temporary file for the chunk merge
-    temp_chunk_output <- tempfile(fileext = ".pdf")
-    pdf_combine(input = chunk, output = temp_chunk_output)
-    merged_files <- c(merged_files, temp_chunk_output)
+  #Get thematic group
+  group<-groups[i]
+  
+  #List all PDF files for that thematic group
+  pdf_files <- list.files(folder, pattern = "\\.pdf$", full.names = TRUE)
+  
+  if (length(pdf_files) == 0) {
+    message(paste("No PDF files found in folder:", folder_path))
+    return(NULL)
   }
+
   
-  # Merge all temporary chunk files into the final output
-  pdf_combine(input = merged_files, output = temp_output)
+   # Define a chunk size, e.g., 100 PDFs per batch
+  chunk_size <- 100
+  num_chunks <- ceiling(length(pdf_files) / chunk_size)
   
-  # Clean up temporary files
-  file.remove(merged_files)
+  # Store intermediate batch PDFs
+  batch_files <- list()
+
+  # Process PDFs in chunks
+  for (j in seq_len(num_chunks)) {
+    start_idx <- (j - 1) * chunk_size + 1
+    end_idx <- min(j * chunk_size, length(pdf_files))
+    batch_pdf_files <- pdf_files[start_idx:end_idx]
+    
+    # Combine PDFs in the current batch
+    batch_output <- paste0(folder, "/", group, "_batch_", j, ".pdf")
+    pdf_combine(input = batch_pdf_files, output = batch_output)
+    
+    # Save the batch file for final combining
+    batch_files <- c(batch_files, batch_output)
+    
+    # Call garbage collector to free memory
+    gc()
+  }
+
+  # Combine the intermediate batch PDFs into the final combined file
+  final_output <- paste0(folder, "/", group, "_combined.pdf")
+  pdf_combine(input = batch_files, output = final_output)
+  
+  # Optionally, remove intermediate batch files after final combination
+  file.remove(unlist(batch_files))
+
+  i <- i + 1
 }
 
-# Process each folder
-for (i in seq_along(folders)) {
-  # Get list of PDF files in the current folder
-  pdf_files <- list.files(folders[i], pattern = "\\.pdf$", full.names = TRUE)
-  
-  # Merge PDFs in this folder into a single PDF for the group
-  merge_pdfs_in_chunks(pdf_files, grouped_pdfs[i])
-}
 
+folder_pdfs <- c("./plots/Report/Report_HS.pdf","./plots/FW Inverts/fw_inverts_combined.pdf","./plots/Marine/marine_combined.pdf","./plots/Plants/plants_combined.pdf", "./plots/TER Inverts/ter_inverts_combined.pdf" ,"./plots/Verts/verts_combined.pdf" )
 
-# Define the final output PDF file
-final_pdf <- file.path("./plots/Report/HS_Report.pdf")
+# Merge all the folder PDFs into the final large PDF
+pdf_combine(input = folder_pdfs, 
+            output = "./plots/Report/FINAL/HS_Report_final.pdf")
 
-# Merge all grouped PDFs into the final document
-pdf_combine(input = grouped_pdfs[1:2], output = "./plots/Report/HS_report_FW_Inverts.pdf")
-pdf_combine(input = grouped_pdfs[c(1,3)], output = "./plots/Report/HS_report_Marine.pdf")
-pdf_combine(input = grouped_pdfs[c(1,4)], output = "./plots/Report/HS_report_Plants.pdf")
-pdf_combine(input = grouped_pdfs[c(1,5)], output = "./plots/Report/HS_report_TER_Inverts.pdf")
-pdf_combine(input = grouped_pdfs[c(1,6)], output = "./plots/Report/HS_report_Verts.pdf")
+#---------------------Merge the PDF of each thematic group with the report -----------
+pdf_combine(input = c("./plots/Report/Report_HS.pdf","./plots/FW Inverts/fw_inverts_combined.pdf"), 
+            output = "./plots/Report/FINAL/HS_Report_FW_inverts.pdf")
+
+pdf_combine(input = c("./plots/Report/Report_HS.pdf","./plots/Marine/marine_combined.pdf"), 
+            output = "./plots/Report/FINAL/HS_Report_Marine.pdf")
+
+pdf_combine(input = c("./plots/Report/Report_HS.pdf","./plots/Plants/plants_combined.pdf"), 
+            output = "./plots/Report/FINAL/HS_Report_Plants.pdf")
+ 
+pdf_combine(input = c("./plots/Report/Report_HS.pdf","./plots/TER Inverts/ter_inverts_combined.pdf"), 
+            output = "./plots/Report/FINAL/HS_Report_TER_inverts.pdf")
+ 
+pdf_combine(input = c("./plots/Report/Report_HS.pdf","./plots/Verts/verts_combined.pdf"), 
+            output = "./plots/Report/FINAL/HS_Report_Verts.pdf")
 ```
