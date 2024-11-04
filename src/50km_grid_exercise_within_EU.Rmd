@@ -769,6 +769,7 @@ ggplot( aes(total_grid_cells)) +
   geom_histogram(binwidth=1, color="black", fill="green") +
   stat_bin(binwidth=1, geom='text', color='black', aes(label=after_stat(count)),
            position=position_stack(vjust = 0.5))+
+  geom_vline(xintercept=2.5, color="red", size=1)+
   xlab("Number of grid cells occupied") + ylab("Number of species")+
   scale_x_continuous(breaks=1:20)+
   theme_bw()
