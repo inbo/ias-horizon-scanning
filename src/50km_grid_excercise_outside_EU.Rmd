@@ -1,0 +1,315 @@
+---
+title: "Untitled"
+author: "Soria Delva"
+date: "2024-10-15"
+output: html_document
+---
+
+This Rmarkdown document assesses the occupied grid cells in European countries that are not part of the EU for species that were included in the original download as part of the 50km_grid_exercise_within_EU script. This information can then be (1) stored on the drive in the maps_data_outside_EU sheet and (2) added to the occupancy maps created in the Create_maps script.
+
+#Setup
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+Load libraries.
+```{r Load libraries}
+library(googlesheets4)
+library(googledrive)
+library(dplyr)
+library(rgbif)
+library(progress)
+library(sf)
+library(rnaturalearth)
+library(terra)
+library(data.table)
+library(mapview)
+library(here)
+library(CoordinateCleaner)
+library(readr)
+```
+
+
+#Prepare necessary objects for download
+
+```{r Create wkt for download}
+#Create an sf dataset of European countries outside the EU with their associated EEZ and convert to WKT format
+europe<-st_read("./data/spatial/EEZ/EEZ_land_v2_201410.shp")%>%
+  filter(Country%in%c("Norway","United Kingdom", "Switzerland","Iceland","Bosnia & Herzegovina","Albania","Montenegro","Serbia","Kosovo","Montenegro","Macedonia","Belarus","Ukraine","Moldova","Cyprus"))
+mapview(europe)
+
+europe_wkt<-europe%>%
+  mutate(group="Europe")%>%
+  group_by(group) %>% 
+  summarise()%>% #Merge multipolygons of EU states into one multipolygon 
+  #sf::st_simplify(dTolerance=10) %>% #simpligy the polygon (in m) because there were too many points for rgbif
+  st_make_valid()%>%
+  sf::st_geometry() %>% 
+  sf::st_as_text()%>%  
+  wk::wkt() %>% 
+  wk::wk_orient()#Due to changes in GBIF’s polygon interpretation, you might get an error when using polygons wound in the “wrong direction” (clockwise, i.e., default of sf). Reorient the polygon using the wk package
+
+```
+
+```{r Create vector of taxonkeys for download}
+#We will use the same taxonkeys as for the download in the 50km_grid_exercise (within EU) (6751)
+taxonkeys_data<-read_csv("./data/input/taxonkeys_gridcells_eu_download.csv")
+taxonkeys_data$taxonkeys<-gsub('[" ,]', '', taxonkeys_data$taxonkeys)
+taxonkeys<-taxonkeys_data%>%
+  mutate(taxonkeys=as.numeric(taxonkeys))%>%
+    pull(taxonkeys)
+
+```
+
+##Download occurrences inside EEZ of European Member States
+
+```{r GBIF download}
+
+#Indicate basis of record for download
+basis_of_record <- c(
+  "OBSERVATION", 
+  "HUMAN_OBSERVATION",
+  "MATERIAL_SAMPLE", 
+  "LITERATURE", 
+  "PRESERVED_SPECIMEN", 
+  "UNKNOWN", 
+  "MACHINE_OBSERVATION")
+
+
+# Identification_verification_status to discard
+identificationverificationstatus_to_discard<- c(
+  "unverified",
+  "unvalidated",
+  "not validated",
+  "under validation",
+  "not able to validate",
+  "control could not be conclusive due to insufficient knowledge",
+  "Control could not be conclusive due to insufficient knowledge",
+  "0",
+  "uncertain",
+  "unconfirmed",
+  "Douteux",
+  "Invalide",
+  "Non r\u00E9alisable",
+  "verification needed" ,
+  "Probable",
+  "unconfirmed - not reviewed",
+  "validation requested")
+
+#Download occurrences for each taxonkey (n = 6751) inside EEZ of member states (approx. 7h)
+system.time({
+  gbif_download_key <- rgbif::occ_download(
+    pred_in("taxonKey", taxonkeys),
+    pred("hasGeospatialIssue", FALSE), #Remove default geospatial issues
+    pred("hasCoordinate", TRUE), # Keep only records with coordinates
+    pred("occurrenceStatus", "PRESENT"), #Keep only presences
+    pred_within(europe_wkt), #keep only records within EEZ of member states
+    pred_in("basisOfRecord", basis_of_record),#basisOfRecord has to match aforementioned categories
+    pred_or(
+      pred_lt("coordinateUncertaintyInMeters",50000),
+      pred_isnull("coordinateUncertaintyInMeters")),
+    pred_gte("year", 1980), #Year has to be 1980 or higher
+    pred_lte("year", year(Sys.Date())) #Year has to be current year or lower
+  )
+  
+  #Follow the status of the download (downloadkey: )
+  occ_download_wait(gbif_download_key)
+}) 
+
+#Get DOI of download
+print(gbif_citation(occ_download_meta(gbif_download_key))$download)
+
+
+#--------------Retrieve downloaded records-------------
+
+gbif_download_key<-"0016765-241007104925546" #Downloaded October 15 2024
+
+#The download file is too large to read into R as a whole, only import data for selected columns
+occ_download_get(gbif_download_key,overwrite = TRUE, path=tempdir())%>%
+  unzip( exdir = tempdir())
+
+#Read in species records
+species_records<-fread(file.path(tempdir(), paste0("occurrence.txt")), 
+                       select=c("speciesKey","scientificName","year","decimalLatitude", "decimalLongitude", "coordinateUncertaintyInMeters", "kingdom","phylum","class","order", "family", "genus", "taxonKey","identificationVerificationStatus"))
+
+```
+
+##Clean occurrence data
+
+```{r Data cleaning}
+# Only keep coordinates that are not flagged as potentially problematic
+species_records<- species_records%>%
+  filter(!identificationVerificationStatus %in% identificationverificationstatus_to_discard)%>%
+    cc_cen(buffer=50) %>% # remove points within a buffer of 50m of country centroids
+    cc_cap(buffer=50) %>% # remove capitals centroids (buffer 50m)
+    cc_inst(buffer=50) %>% # remove zoo and herbaria
+    cc_gbif(buffer=50)%>%
+    cc_zero()
+  
+length(unique(species_records$speciesKey)) #2065
+
+
+
+```
+
+##Prepare European raster 
+
+Read 50 x 50 km EEA raster grid
+
+```{r Convert 50x50 EEA grid to raster}
+#Read data
+eu_grid <- read_sf("./data/spatial/EEA_50km_grid_v2024.gpkg")
+
+# Convert geometry to right format
+eu_grid<-st_cast(eu_grid, "GEOMETRYCOLLECTION") %>% st_collection_extract("POLYGON")
+
+#----------------------Convert the grid to a raster-----------------------
+#Turn grid into spatVector
+eu_grid_vect <- vect(eu_grid)
+
+# Define the resolution of the raster (50000x50000 meters)
+resolution <- 50000  
+
+# Create an empty raster with the extent, resolution, and crs
+raster_template <- rast(ext(eu_grid_vect), 
+                        resolution = resolution, 
+                        crs = crs(eu_grid_vect))
+
+# Convert polygons to a raster and choose column to rasterize (cellcode)
+EU_raster <- rasterize(eu_grid_vect, raster_template, field = "cellcode")
+
+# Plot the rasterized data
+mapview(EU_raster)
+
+```
+
+
+Mask rastergrid to extent of EU member states and their respective EEZ 
+
+```{r Mask EEA raster grid and convert to shapefile}
+#Transform to same crs as 50x50rastergrid
+EEZ<-europe%>%
+  st_transform(., crs=st_crs(eu_grid))
+
+#Crop raster grid to extent of EEZ shape
+EEZ_ext<-terra::ext(EEZ) 
+
+#Convert EEZ to a SpatVector that can be used for masking
+EEZ_vector <- vect(EEZ) 
+
+#Crop EU_raster to extent of EEZ
+EU_raster_crop <- terra::crop(EU_raster, EEZ_ext)
+
+# Rasterize the EEZ SpatVector to the extent and resolution of the cropped EU raster
+#All raster cells that touch the EEZ shape are included, country is assigned based on in which country tha majority of the cell's surface area falls
+eu_50raster <- terra::rasterize(EEZ_vector, EU_raster_crop, field = "Country", touches=TRUE)
+
+#Visualize raster
+mapview(eu_50raster)
+
+#Remove objects 
+rm(EEZ,EEZ_ext, EEZ_vector, EU_raster, eu_grid, EU_raster_crop, mask_islands, raster_template, eu_grid_vect)
+
+```
+
+##Count for each taxon how many grids are occupied in total and per country 
+
+```{r}
+#Convert coordinates to crs 3035
+species_records<-st_as_sf(species_records, coords=c("decimalLongitude", "decimalLatitude"), crs=4326, remove=FALSE)%>%
+  st_transform(crs=st_crs(3035))%>%
+  st_coordinates()%>%
+  cbind(., species_records)
+
+# Get the cellnumber for each observation
+species_records$grid_cell <- cellFromXY(eu_50raster, species_records[,c("X","Y")]) 
+
+#Assign country codes based on the grid cell
+species_records$country <- terra::extract(eu_50raster, species_records[,c("X", "Y")])[, "Country"]  
+
+# Remove observations in NA grid cells (i.e., outside the study area) and NA countries (not in an EU member state) (should be zero since we already filtered on that in download)
+#Filter to only include grid cells where a species has been observed in more than one year
+#2247 species
+species_records <- species_records%>%
+  filter(!is.na(grid_cell), 
+       !is.na(country))%>%
+  group_by(speciesKey, grid_cell) %>%
+  filter(n_distinct(year) > 1)%>%# Keeps only grid cells with multiple years of observations 
+  ungroup()
+
+
+#Export the species for which no records are downloaded or for which all records were removed by coordinate cleaner or previous filtering steps (5305)
+taxa_not_included<-taxonkeys_data%>%
+  filter(!taxonkeys %in% c(species_records$speciesKey))%>% 
+  mutate(total_grid_cells=0,
+         grid_cells_per_country=0,
+         country=NA_character_,
+         grid_cell= NA
+        )
+
+# Count the number of unique grid cells per species per country 
+country_cell_count<- species_records%>%
+  group_by(speciesKey, country) %>%
+  summarise(grid_cells_per_country = n_distinct(grid_cell))%>%
+  ungroup()
+
+country_cell_count<- taxa_not_included %>%
+   rename(speciesKey = "taxonkeys")%>%
+  select(c(colnames(country_cell_count)))%>%
+  rbind(.,country_cell_count)
+
+#Create a dataframe with total grid cells and column that indicates how many in which country 
+total_gridcells <- country_cell_count %>%
+  # Group by specieskey
+  group_by(speciesKey) %>%
+  # Summarize to get the total grid cells per specieskey
+  summarize(
+    total_grid_cells = sum(grid_cells_per_country, na.rm = TRUE),
+    # Create the text summary for country and grid cell counts, handling NA
+    n_gridcells_country = if (all(is.na(country))) {
+    "0"# Return 0 if all country values are NA
+    } else {
+      paste(
+        paste(country[!is.na(country)], "(", grid_cells_per_country[!is.na(country)], ")", sep = ""),
+        collapse = ", "
+      )
+    }
+  ) %>%
+ungroup()
+```
+
+
+#Create dataset to visualize grid cells
+
+```{r Create dataset to visualize gridcells on EU maps}
+
+#Per species, keep only distinct grid cells
+maps_data<-species_records%>%
+  group_by(speciesKey,country)%>%
+ distinct(grid_cell)
+
+#Add taxa without any grid cells in the EU, as well as the number of grid cells a species occupied
+maps_data<- taxa_not_included %>%
+   rename(speciesKey = "taxonkeys")%>%
+  select(c(colnames(maps_data)))%>%
+  rbind(.,maps_data)%>%
+  left_join(., total_gridcells[,c("total_grid_cells", "speciesKey","n_gridcells_country")], by="speciesKey")
+
+#----------Add spatial information of every grid cell----------
+cellcoords<- xyFromCell(eu_50raster, maps_data$grid_cell)
+maps_data<-cbind(maps_data, cellcoords) #52634 rows
+
+```
+
+```{r Export data}
+#Export data (5362 unique IDs, 286 with 3-5 grid cells + 5076 with max 2 grid cells)
+ss0<-gs4_create("maps_data_outside_EU", sheets="Data")
+write_sheet(maps_data, ss=ss0, sheet="Data")
+```
+
+
+
+
+
+
